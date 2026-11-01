@@ -1,0 +1,45 @@
+name: Retarget fork URLs to Minjia6
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  retarget:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Restore awgctl.sh from upstream and retarget URLs
+        run: |
+          set -euo pipefail
+          curl -fsSL https://raw.githubusercontent.com/yys9253462-gif/hysteria2-installer/main/awgctl.sh \
+            | sed 's|yys9253462-gif/hysteria2-installer|Minjia6/hysteria2-installer|g' \
+            > awgctl.sh
+
+          for f in install.sh portal.py README.md awgctl.sh; do
+            if [ -f "$f" ]; then
+              sed -i 's|yys9253462-gif/hysteria2-installer|Minjia6/hysteria2-installer|g' "$f" || true
+            fi
+          done
+          if [ -f install.sh ]; then
+            sed -i 's|Author: Yanshan (yys9253462-gif)|Fork: Minjia6|g' install.sh || true
+          fi
+
+          echo "=== remaining old refs ==="
+          grep -R "yys9253462-gif" --include='*.sh' --include='*.py' --include='*.md' . || echo "ALL CLEAR"
+
+      - name: Commit and push
+        run: |
+          set -euo pipefail
+          git config user.name "Minjia6"
+          git config user.email "minjia360@gmail.com"
+          git add -A
+          if git diff --cached --quiet; then
+            echo "No changes to commit"
+          else
+            git commit -m "Retarget all repo URLs to Minjia6 fork; restore awgctl.sh"
+            git push origin HEAD
+          fi
