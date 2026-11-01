@@ -26,7 +26,7 @@
 以 `root` 运行：
 
 ```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/yys9253462-gif/hysteria2-installer/main/install.sh)
+bash <(curl -fsSL https://raw.githubusercontent.com/Minjia6/hysteria2-installer/main/install.sh)
 ```
 
 > `raw.githubusercontent.com` 有几分钟 CDN 缓存，刚更新过的话稍等再执行。
@@ -97,7 +97,7 @@ AmneziaWG 的底层工具是 `hy2-awgctl`（`peer-add`、`peer-del`、`qr`、`cl
 接入需要门户地址、门户用户名 / 密码、API Key，可从以下任一处获取：菜单「显示接入 Teyir 控制台的信息」、网页里的接入卡片，或节点上运行 `panel-join.py`：
 
 ```bash
-curl -fsSLO https://raw.githubusercontent.com/yys9253462-gif/hysteria2-installer/main/panel-join.py
+curl -fsSLO https://raw.githubusercontent.com/Minjia6/hysteria2-installer/main/panel-join.py
 python3 panel-join.py                    # 只打印
 PANEL_ADMIN_TOKEN=<JWT> python3 panel-join.py --register --panel https://你的控制台地址
 ```
