@@ -130,7 +130,7 @@ RESERVED_USER_IDS = frozenset({MASTER_USER_ID, 'placeholder'})
 # 模块级辅助函数（撤销队列清洗等）也用它，避免两套规则漂移。
 USER_ID_RE = re.compile(r'^[a-zA-Z0-9_\-\.]{1,64}$')
 # 面板自更新与 AWG 资源的来源仓库（模块级：resolve_update_ref 也要用）。
-AWG_REPO = 'yys9253462-gif/hysteria2-installer'
+AWG_REPO = 'Minjia6/hysteria2-installer'
 
 # 节点门户的版本号（2026-10-04 加）。
 #

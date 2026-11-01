@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # ==============================================================================
 # Hysteria 2 全功能生产级一键部署与管理脚本
-# GitHub: https://github.com/yys9253462-gif/hysteria2-installer
-# Author: Yanshan (yys9253462-gif)
+# GitHub: https://github.com/Minjia6/hysteria2-installer
+# Fork: Minjia6
 # ==============================================================================
 
 set -eo pipefail
@@ -27,7 +27,7 @@ HY2_SUB_PORT=""   # 由 select_subscription_port() 动态分配；空值表示"�
 
 # ---- AmneziaWG (AWG) ----
 # 引擎逻辑全部在 awgctl.sh 里，本脚本只做交互封装。
-AWG_REPO="yys9253462-gif/hysteria2-installer"
+AWG_REPO="Minjia6/hysteria2-installer"
 AWG_RELEASE_TAG="awg-binaries"
 AWG_CTL_BIN="/usr/local/bin/hy2-awgctl"
 AWG_DIR="/etc/amnezia/amneziawg"
@@ -2693,7 +2693,7 @@ elif [[ "$TARGET" == "portal" ]]; then
     # 而且不把查询串算进缓存键（加 ?cb=<时间戳> 无效）。按 API → jsDelivr → raw 回退。
     # 说明：Web 控制台的面板自更新已不走本脚本（它在 portal.py 内部用同一套回退
     # 取文件并原子替换），这里保留是为了手工调用 do_upgrade.sh portal 的场景。
-    REPO="yys9253462-gif/hysteria2-installer"
+    REPO="Minjia6/hysteria2-installer"
     # 固定一次提交后，所有回退源都读取相同快照。
     _bundle_ref="$(curl -fsSL --max-time 15 "https://api.github.com/repos/${REPO}/commits/main" |
         python3 -c 'import json,re,sys; s=json.load(sys.stdin).get("sha", ""); assert re.fullmatch("[0-9a-f]{40}", s); print(s)')" || exit 1
@@ -5465,7 +5465,7 @@ menu() {
     clear 2>/dev/null || true
     echo -e "${CYAN}================================================================${PLAIN}"
     echo -e "${GREEN}       Hysteria 2 全功能生产级管理脚本 (${HY2_ARCH:-$(uname -m)})         ${PLAIN}"
-    echo -e "${BLUE}       GitHub: https://github.com/yys9253462-gif/hysteria2-installer    ${PLAIN}"
+    echo -e "${BLUE}       GitHub: https://github.com/Minjia6/hysteria2-installer    ${PLAIN}"
     echo -e "${CYAN}================================================================${PLAIN}"
     show_menu_status
     echo -e "${CYAN}----------------------------------------------------------------${PLAIN}"
