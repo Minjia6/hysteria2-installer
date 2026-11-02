@@ -5290,6 +5290,9 @@ def install_singbox():
 
     sing-box 的 Release 没有 checksums 文件，预期摘要取 GitHub API 给每个
     资产记录的 sha256 digest（只信 api.github.com，镜像只作传输候选）。
+
+    2026-11-02：多镜像 + 较短单源超时 + API 重试，避免面板长时间卡在
+    「正在下载并校验」（仅 github.com / 单次 180s 时在部分 VPS 上几乎必挂）。
     """
     current = _singbox_version()
     if current and current >= ANYTLS_MIN_SINGBOX:
@@ -5299,31 +5302,57 @@ def install_singbox():
             'armv7l': 'armv7', 'armv7': 'armv7'}.get(machine)
     if not arch:
         return False, '不支持的 CPU 架构: %s' % machine
-    try:
-        req = urllib.request.Request('https://api.github.com/repos/SagerNet/sing-box/releases/latest',
-                                     headers={'User-Agent': 'hy2-portal'})
-        with urllib.request.urlopen(req, timeout=15) as r:
-            release = json.loads(r.read().decode('utf-8'))
-    except Exception as exc:
-        return False, '取不到 sing-box 最新版本信息: %s' % exc
+
+    release = None
+    api_errors = []
+    api_url = 'https://api.github.com/repos/SagerNet/sing-box/releases/latest'
+    for attempt in range(3):
+        try:
+            req = urllib.request.Request(api_url, headers={'User-Agent': 'hy2-portal'})
+            with urllib.request.urlopen(req, timeout=20) as r:
+                release = json.loads(r.read().decode('utf-8'))
+            break
+        except Exception as exc:
+            api_errors.append('try%s: %s' % (attempt + 1, exc))
+            time.sleep(1.5 * (attempt + 1))
+    if release is None:
+        return False, '取不到 sing-box 最新版本信息（已重试）—— ' + ' ｜ '.join(api_errors)
+
     tag = str(release.get('tag_name') or '')
     ver = tag.lstrip('v')
+    if not ver:
+        return False, 'GitHub 返回的 tag_name 为空，无法安装 sing-box'
     asset_name = f'sing-box-{ver}-linux-{arch}.tar.gz'
     asset = next((a for a in release.get('assets') or [] if a.get('name') == asset_name), None)
     digest = str((asset or {}).get('digest') or '')
     expected = digest[len('sha256:'):] if digest.startswith('sha256:') else ''
     if not re.fullmatch(r'[0-9a-f]{64}', expected):
         return False, '取不到 %s 的官方 SHA256，无法校验下载内容，已放弃安装' % asset_name
+
     official = f'https://github.com/SagerNet/sing-box/releases/download/{tag}/{asset_name}'
+    # 多源轮询：单源超时缩短，总等待可控；镜像顺序与 Xray 安装保持一致并多一个备用。
+    dl_urls = [
+        official,
+        'https://ghfast.top/' + official,
+        'https://github.moeyy.xyz/' + official,
+        'https://gh-proxy.com/' + official,
+        'https://mirror.ghproxy.com/' + official,
+    ]
     errors = []
     with tempfile.TemporaryDirectory() as tmpdir:
         archive = Path(tmpdir) / 'sing-box.tar.gz'
-        for url in (official, 'https://ghfast.top/' + official):
-            host = url.split('/')[2]
+        for url in dl_urls:
+            host = url.split('/')[2] if '//' in url else url
             try:
+                if archive.exists():
+                    archive.unlink()
                 req = urllib.request.Request(url, headers={'User-Agent': 'hy2-portal'})
-                with urllib.request.urlopen(req, timeout=180) as resp, open(archive, 'wb') as out:
+                # 单源 60s：失败立刻换源，避免 UI 卡死数分钟
+                with urllib.request.urlopen(req, timeout=60) as resp, open(archive, 'wb') as out:
                     shutil.copyfileobj(resp, out)
+                if not archive.exists() or archive.stat().st_size < 1024:
+                    errors.append('%s: 下载文件过小或为空' % host)
+                    continue
                 if not verify_sha256(archive, expected):
                     errors.append('%s: SHA256 与官方不一致' % host)
                     continue
@@ -5340,26 +5369,10 @@ def install_singbox():
                     staged.unlink(missing_ok=True)
                     return False, 'sing-box 版本 %s 不支持 AnyTLS（需要 1.12.0+）' % ver
                 os.replace(str(staged), ANYTLS_BINARY)
-                return True, 'sing-box %s 安装完成' % ver
+                return True, 'sing-box %s 安装完成（来源 %s）' % (ver, host)
             except Exception as exc:
                 errors.append('%s: %s: %s' % (host, type(exc).__name__, exc))
     return False, '下载 sing-box 失败 —— ' + ' ｜ '.join(errors)
-
-
-# ---- VLESS Encryption（2026-10-24 加，VMess 的上游替代路线）----
-#
-# 与 Reality 的区别：Reality 借用大厂站点的证书握手来伪装，**不需要自己的域名**；
-# VLESS Encryption 是自己做真正的 TLS 服务端 + ML-KEM-768 后量子密钥交换，
-# 因此和 VMess 一样需要域名与可信证书。
-#
-# 密钥由 `xray vlessenc` 生成一对：
-#   decryption -> 服务端 inbound.settings.decryption
-#   encryption -> 客户端 outbound.users[].encryption
-# 两者必须来自**同一次**调用，混用会让握手直接失败（实测过）。
-
-VLESSENC_DECRYPTION_RE = re.compile(
-    r'^mlkem768x25519plus\.(native|xorpub|random)\.[0-9]+s?(-[0-9]+)?\.[A-Za-z0-9_\-]+$')
-
 
 def generate_vless_encryption_pair(binary='/usr/local/bin/xray'):
     """调用 `xray vlessenc` 生成一对密钥，返回 (decryption, encryption)。
