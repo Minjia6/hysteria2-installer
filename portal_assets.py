@@ -2492,21 +2492,37 @@ async function uninstallCore(core, btn) {
   });
   if (!confirmed) return;
   btn.disabled = true;
+  const orig = btn.textContent;
   btn.textContent = '⏳ 正在卸载...';
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 120000);
   try {
     const res = await fetch(location.pathname + 'uninstall-core', {
       method: 'POST',
       credentials: 'same-origin',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: 'name=' + encodeURIComponent(core.id)
+      body: 'name=' + encodeURIComponent(core.id),
+      signal: controller.signal
     });
-    let json = null;
-    try { json = await res.json(); } catch (_) { json = null; }
+    let json;
+    try {
+      json = await res.json();
+    } catch (_) {
+      alert('卸载失败（HTTP ' + res.status + '）：服务器返回的不是有效 JSON');
+      return;
+    }
     if (json && json.ok) showToast(json.message || '已卸载', 'success');
     else alert((json && json.error) || ('卸载失败（HTTP ' + res.status + '）'));
   } catch (e) {
-    alert('请求异常: ' + e.message);
+    if (e && e.name === 'AbortError') {
+      alert('卸载请求等待超时。请先刷新核心状态确认实际结果，不要立即重复点击卸载。');
+    } else {
+      alert('请求异常: ' + (e && e.message ? e.message : e));
+    }
   } finally {
+    clearTimeout(timeoutId);
+    btn.disabled = false;
+    btn.textContent = orig;
     await loadCores();
   }
 }
