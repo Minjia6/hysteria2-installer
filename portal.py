@@ -5788,6 +5788,22 @@ def _systemd_state(unit):
         return ''
 
 
+def _systemd_load_state(unit):
+    """获取 systemd unit 的 LoadState；无法确认时返回空字符串。"""
+    try:
+        result = subprocess.run(
+            ['systemctl', 'show', '--property=LoadState', '--value', unit],
+            capture_output=True,
+            text=True,
+            timeout=5
+        )
+        if result.returncode != 0:
+            return ''
+        return result.stdout.strip()
+    except (OSError, subprocess.SubprocessError):
+        return ''
+
+
 def _service_stop_confirmed(result, state):
     """systemd stop 成功且服务状态明确为 inactive/failed 才视为已停止。"""
     return result.returncode == 0 and state in ('inactive', 'failed')
@@ -11428,32 +11444,36 @@ if __name__ == '__main__':
                         if in_use:
                             return self.reply_json(409, {'ok': False, 'error':
                                 '以下协议仍在使用 %s：%s。请先到对应协议页关闭后再卸载' % (name, '、'.join(in_use))})
-                        unit_states = {}
+                        # 只停 LoadState=loaded 的 unit。not-found 表示服务本来就不存在
+                        # （例如 AnyTLS/TUIC 从未安装），不能因此让整次卸载失败。
+                        # 空串、超时或其它未知状态一律 fail-closed：不停止、不删文件。
+                        loaded_units = []
                         for unit in unit_names:
-                            active = _systemd_state(unit) == 'active'
-                            enabled_state = subprocess.run(
-                                ['systemctl', 'is-enabled', unit], capture_output=True,
-                                text=True, timeout=5).stdout.strip()
-                            unit_states[unit] = (active, enabled_state == 'enabled')
-                        for unit in unit_names:
+                            load_state = _systemd_load_state(unit)
+                            if load_state == 'not-found':
+                                continue
+                            if load_state != 'loaded':
+                                return self.reply_json(500, {'ok': False, 'error':
+                                    '无法确认核心服务 %s 的 systemd 状态（LoadState=%s），已中止卸载并保留所有文件'
+                                    % (unit, load_state or '未知')})
+                            snapshot = _systemd_service_snapshot(unit)
+                            active = snapshot.get('active')
+                            enabled = snapshot.get('enabled')
+                            if active not in ('active', 'inactive', 'failed') or enabled not in (
+                                    'enabled', 'disabled', 'enabled-runtime', 'static', 'indirect'):
+                                return self.reply_json(500, {'ok': False, 'error':
+                                    '无法保存核心服务 %s 的运行状态快照，已中止卸载并保留所有文件' % unit})
+                            loaded_units.append((unit, snapshot))
+                        for index, (unit, snapshot) in enumerate(loaded_units):
                             stop_result = subprocess.run(
                                 ['systemctl', 'disable', '--now', unit],
                                 capture_output=True, timeout=30)
                             state = _systemd_state(unit)
                             if not _service_stop_confirmed(stop_result, state):
-                                # Restore every unit's original active and enabled
-                                # state, including units already stopped in this pass.
+                                # 只回滚本次已经处理过、且事先确认存在并保存快照的服务。
                                 restore_failed = []
-                                for restore_unit, (was_active, was_enabled) in unit_states.items():
-                                    enable_result = subprocess.run(
-                                        ['systemctl', 'enable' if was_enabled else 'disable', restore_unit],
-                                        capture_output=True, timeout=30)
-                                    action_result = subprocess.run(
-                                        ['systemctl', 'start' if was_active else 'stop', restore_unit],
-                                        capture_output=True, timeout=30)
-                                    restored_state = _systemd_state(restore_unit)
-                                    active_ok = restored_state == ('active' if was_active else 'inactive')
-                                    if enable_result.returncode != 0 or action_result.returncode != 0 or not active_ok:
+                                for restore_unit, restore_snapshot in loaded_units[:index + 1]:
+                                    if not _restore_systemd_service_state(restore_unit, restore_snapshot):
                                         restore_failed.append(restore_unit)
                                 if restore_failed:
                                     return self.reply_json(500, {'ok': False, 'error':

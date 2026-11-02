@@ -890,28 +890,38 @@ class WebWorkflowTests(unittest.TestCase):
         unit.parent.mkdir(parents=True, exist_ok=True)
         unit.write_text('xray unit', encoding='utf-8')
         commands = []
-        self.ns['subprocess'].run = Mock(side_effect=lambda args, **kw:
-            (commands.append(args) or SimpleNamespace(returncode=1 if args[:3] ==
-             ['systemctl', 'disable', '--now'] else 0)))
-        states = {'hy2-anytls': 'active', 'hy2-tuic': 'active'}
+        states = {
+            'hy2-anytls': {'active': 'active', 'enabled': 'disabled'},
+            'hy2-tuic': {'active': 'active', 'enabled': 'enabled'},
+        }
+
         def run(args, **kwargs):
-            commands.append(args)
+            commands.append(list(args))
+            if args[:2] == ['systemctl', 'show'] and '--property=LoadState' in args:
+                return SimpleNamespace(returncode=0, stdout='loaded\n', stderr='')
+            name = args[-1]
+            if args[:2] == ['systemctl', 'is-active']:
+                return SimpleNamespace(returncode=0, stdout=states[name]['active'] + '\n', stderr='')
             if args[:2] == ['systemctl', 'is-enabled']:
-                return SimpleNamespace(returncode=0,
-                    stdout='disabled' if args[2] == 'hy2-anytls' else 'enabled')
-            if args[:3] == ['systemctl', 'disable', '--now'] and args[3] == 'hy2-tuic':
-                return SimpleNamespace(returncode=1)
-            if args[:2] == ['systemctl', 'disable'] and args[2] == 'hy2-anytls':
-                states['hy2-anytls'] = 'inactive'
-            if args[:2] == ['systemctl', 'start'] and args[2] == 'hy2-anytls':
-                states['hy2-anytls'] = 'active'
-            return SimpleNamespace(returncode=0)
+                return SimpleNamespace(returncode=0, stdout=states[name]['enabled'] + '\n', stderr='')
+            if args[:3] == ['systemctl', 'disable', '--now'] and name == 'hy2-tuic':
+                return SimpleNamespace(returncode=1, stdout='', stderr='')
+            if args[:2] == ['systemctl', 'disable'] and name == 'hy2-anytls':
+                states['hy2-anytls']['active'] = 'inactive'
+            if args[:2] == ['systemctl', 'start'] and name == 'hy2-anytls':
+                states['hy2-anytls']['active'] = 'active'
+            return SimpleNamespace(returncode=0, stdout='', stderr='')
+
         self.handler.rfile = io.BytesIO(urlencode({'name': 'sing-box'}).encode())
         self.handler.headers = {'Content-Length': str(len(urlencode({'name': 'sing-box'})))}
         self.handler._core_users = lambda _: []
-        self.ns['subprocess'].run = Mock(side_effect=run)
-        self.ns['_systemd_state'] = lambda unit: states[unit]
-        self.ns['_service_stop_confirmed'] = portal._service_stop_confirmed
+        self.ns['subprocess'] = SimpleNamespace(
+            run=Mock(side_effect=run),
+            SubprocessError=subprocess.SubprocessError,
+            TimeoutExpired=subprocess.TimeoutExpired)
+        for helper in ('_systemd_load_state', '_systemd_state', '_systemd_service_snapshot',
+                       '_restore_systemd_service_state', '_service_stop_confirmed'):
+            extract_method(helper, self.ns)
         status, body = extract_method('_h_post_uninstall_core', self.ns)(
             self.handler, '/test-token/')
         self.assertEqual(status, 500, body)
@@ -935,6 +945,8 @@ class WebWorkflowTests(unittest.TestCase):
             events.append(('check', None))
             return []
         self.handler._core_users = users
+        self.ns['_systemd_load_state'] = lambda unit: 'loaded'
+        self.ns['_systemd_service_snapshot'] = lambda unit: {'active': 'inactive', 'enabled': 'disabled'}
         self.ns['subprocess'].run = Mock(return_value=SimpleNamespace(returncode=0, stdout='enabled'))
         self.ns['_systemd_state'] = lambda _: 'inactive'
         self.ns['_service_stop_confirmed'] = portal._service_stop_confirmed
